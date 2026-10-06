@@ -1,59 +1,69 @@
 # ParkPal Backend
-## DB Setup
 
-For this project, we are using PostgreSQL. The instructions are as follows.
+The ParkPal backend is built with Python 3.12 Flask and connects to a PostgreSQL database.
 
-First, download PostgreSQL server:
-`sudo apt install postgresql`
-`sudo dnf install postgresql`
-`sudo yum install postgresql`
+---
 
-(Or download the official server software in Windows)
+## 1. Database Setup (Docker)
 
-Next, start the PostgreSQL server:
-`sudo pg_ctlcluster 12 main start`
+Use the provided `docker-compose.yml` in the project root to run PostgreSQL:
 
-(Or equivalent command in Windows)
-
-[NEW] Run the SQL init script:
-```
-psql -h 127.0.0.1 -f scripts/init.sql
+```bash
+# From repository root:
+docker compose up -d
 ```
 
-OR, Configure the server in a local shell:
-```
-psql
-=# CREATE USER parkpal WITH PASSWORD 'pass';
-=# CREATE DATABASE parkpal WITH OWNER = parkpal;
-=# \q
-```
-Edit the `pg_hba.conf` to use `md5` authentication instead of `peer` for `parkpal`
-```
-psql parkpal parkpal
-=> CREATE TABLE "users"(id SERIAL PRIMARY KEY, username VARCHAR (255) UNIQUE NOT NULL, password VARCHAR (64) NOT NULL);
-=> CREATE TABLE "feature"(fid INTEGER UNIQUE NOT NULL, name VARCHAR (35) UNIQUE NOT NULL, image VARCHAR);
-=> CREATE TABLE "park"(pid INTEGER NOT NULL, name VARCHAR, fid INTEGER NOT NULL, lat FLOAT, lon FLOAT, hours VARCHAR (60), youth_only BOOLEAN, lighting BOOLEAN);
-=> CREATE TABLE "notes"(pid INTEGER, uid INTEGER, note VARCHAR);
-=> \d
-```
-We should now see that there are `user`, `feature`, `park`, and `notes` tables!
+This launches a PostgreSQL container on port `5433` (avoiding local host port conflicts) and automatically runs `scripts/init.sql` to initialize tables:
+- `users`
+- `feature`
+- `park`
+- `notes`
 
-## Python Setup
+---
 
-Install all the packages
+## 2. Python Environment Setup
+
+1. Create a Python virtual environment:
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate
+   ```
+
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+---
+
+## 3. Data Ingestion
+
+Populate the database with Seattle Parks data:
+
+```bash
+python scripts/consolidate.py data/Seattle_Parks.json
 ```
-pip install flask flask_cors psycopg2 config jwcrypto bcrypt jsonify pyjwt[crypto] cryptography
+
+---
+
+## 4. Run the Backend Server
+
+```bash
+python app.py
 ```
 
-You might need to update the `cryptography` package like so:
-```
-pip install --upgrade cryptography
-```
+The server will automatically generate an RSA key pair (`.cert/privatekey.pem` and `.cert/publickey.cer`) if one does not exist, and will start on `http://127.0.0.1:5000`.
 
-## Data Integration
+---
 
-`python scripts/consolidate.py data/Seattle_Parks.json`
+## 5. API Endpoints
 
-## Run the Backend
-
-`python app.py`
+| Method | Endpoint | Description | Auth Required |
+|---|---|---|---|
+| GET | `/` | Health check | No |
+| GET | `/parks` | Get all parks with feature IDs and coordinates | No |
+| GET | `/features` | Get all park features | No |
+| POST | `/auth_register` | Register new user account | No |
+| POST | `/auth_login` | Login and obtain RS256 JWT | No |
+| POST | `/auth_getnote` | Fetch user's note for a specific park | Bearer JWT |
+| POST | `/auth_editnote` | Save/update user's note for a specific park | Bearer JWT |

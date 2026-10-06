@@ -1,32 +1,33 @@
-//reads in two arrays, one with matched parks (matches), one with all the features (allFeatures)
-export default function Renamer(matchedParks, FeaturesList) {
-	//for each match
-	matchedParks.map((park) => {
-		//make an array to help remove repeated features
-		let oldfeatures = [];
-		//get each fid
-		park.fids.map((fid, i) => {
-			//make temp var to store feature name
-			let newname = "";
-			//if fid isn't repeated
-			if (!oldfeatures.includes(fid)) {
-				//add fid to list
-				oldfeatures.push(fid);
+//reads in array of matched parks, and array of all features
+export default function Renamer(matchedParks, featuresList = []) {
+	if (!Array.isArray(matchedParks)) {
+		matchedParks = matchedParks ? [matchedParks] : [];
+	}
+	const featureMap = new Map();
+	if (Array.isArray(featuresList)) {
+		featuresList.forEach((f) => {
+			featureMap.set(Number(f.fid), f.name);
+		});
+	}
 
-				//compare against allFeatures
-				FeaturesList.map((feature) => {
-					//if match
-					if (feature.fid == fid) {
-						newname = feature.name; //replace number with name
-					}
-				});
-				//set that new name
-				park.fids[i] = newname;
+	return matchedParks.map((park) => {
+		const newPark = { ...park, fids: [...(park.fids || [])] };
+		const seen = new Set();
+		const mappedFids = [];
+
+		newPark.fids.forEach((fid) => {
+			let name =
+				typeof fid === "number" || (!isNaN(Number(fid)) && fid !== "")
+					? featureMap.get(Number(fid)) || fid
+					: fid;
+
+			if (name && !seen.has(name)) {
+				seen.add(name);
+				mappedFids.push(name);
 			}
 		});
-		//filter out the repeated filters (ones that didn't get converted to a string)
-		park.fids = park.fids.filter((id) => typeof id == "string");
-		return park;
+
+		newPark.fids = mappedFids;
+		return newPark;
 	});
-	return matchedParks;
 }

@@ -1,6 +1,5 @@
 import "./Styles/App.css";
 import "./Styles/BreakPoints.css";
-import axios from "axios";
 import { useState } from "react";
 import { authenticationService } from "./Helpers/authentication.service.js";
 import { Link, useNavigate } from "react-router-dom";

@@ -5,7 +5,7 @@ export default function ParkSlides(props) {
 	// console.log(props);
 	if (props.selected) {
 		return (
-			<button className="parkSlide flexb col selected">
+			<div className="parkSlide flexb col selected">
 				<div>
 					<h3>{props.name}</h3>
 				</div>
@@ -14,13 +14,13 @@ export default function ParkSlides(props) {
 				<ul className="features">
 					{props.fids?.map((fid, index) => {
 						return (
-							<li>{fid}</li>
+							<li key={index}>{fid}</li>
 						)
 					})}
 				</ul>
 				<b>Notes:</b>
 				<Note park={props.pid} />
-			</button>
+			</div>
 		);
 	} else {
 		return (

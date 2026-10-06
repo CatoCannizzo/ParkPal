@@ -9,12 +9,14 @@ export default function Note(props) {
     const [note, setNote] = useState("")
     const [err, setErr] = useState("")
 
-    const jwtHeader = "Bearer " + authenticationService.currentUserValue.token
+    const token = authenticationService.currentUserValue?.token;
+    const jwtHeader = token ? "Bearer " + token : "";
 
     useEffect(() => {
+        if (!props.park || !jwtHeader) return;
         axios({
             method: "post",
-            url: "auth_getnote",
+            url: "/auth_getnote",
             data: {
                 pid: props.park
             },
@@ -23,19 +25,21 @@ export default function Note(props) {
             }
         })
             .then(function (response) {
-                setNote(response.data["note"])
+                setNote(response.data["note"] || "")
             })
             .catch(function (err) {
-                setErr(err.response.data["msg"])
-                authenticationService.logout()
+                setErr(err.response?.data?.["msg"] || "Error loading note")
+                if (err.response?.status === 401) {
+                    authenticationService.logout()
+                }
             })
-    }, [])
+    }, [props.park, jwtHeader])
 
     const handleSubmit = (e) => {
         e.preventDefault();
         axios({
             method: "post",
-            url: "auth_editnote",
+            url: "/auth_editnote",
             data: {
                 note: note,
                 pid: props.park
@@ -48,7 +52,7 @@ export default function Note(props) {
                 setIsEdit(false)
             })
             .catch(function (err) {
-                setErr(err.response.data["msg"])
+                setErr(err.response?.data?.["msg"] || "Error saving note")
             })
     }
 

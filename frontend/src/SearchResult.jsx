@@ -16,11 +16,11 @@ export default function SearchResult() {
 	const location = useLocation();
 	console.log("raw data passed in search", location.state);
 
-	const searchData = location.state.searchResults;
-	const searchSel = location.state.selected;
+	const searchData = React.useMemo(() => location.state?.searchResults || [], [location.state]);
+	const searchSel = location.state?.selected || 0;
 
 	const { isLoaded } = useLoadScript({
-		googleMapsApiKey: process.env.REACT_APP_GOOGLE_MAPS_API_KEY,
+		googleMapsApiKey: process.env.REACT_APP_GOOGLE_MAPS_API_KEY || "",
 	});
 
 	console.log("transformed data", searchData);
@@ -28,7 +28,7 @@ export default function SearchResult() {
 	useEffect(() => {
 		setData(searchData);
 		setSelected(searchSel);
-	}, [searchData]);
+	}, [searchData, searchSel]);
 
 	if (!isLoaded)
 		return (
@@ -36,7 +36,7 @@ export default function SearchResult() {
 				<div className="flexb center">loading...</div>
 			</div>
 		);
-	else if (data.length == 0)
+	else if (data.length === 0)
 		return (
 			<div className="flexb col">
 				<div className="flexb center">

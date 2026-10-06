@@ -1,3 +1,8 @@
 db.ini
 .ssh/
 .cert/
+venv/
+.venv/
+__pycache__/
+*.pyc
+.env

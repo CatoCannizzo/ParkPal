@@ -71,10 +71,11 @@ function Search() {
 	}
 
 	//Checks to see if user searched, if so sends user to SearchResult with search
-	if (searchResults.searchResults.length) {
-		// console.log(searchResults);
-		navigate("../SearchResult", { state: searchResults });
-	}
+	useEffect(() => {
+		if (searchResults.searchResults.length > 0) {
+			navigate("/SearchResult", { state: searchResults });
+		}
+	}, [searchResults, navigate]);
 
 	return (
 		<div className="flexb col">

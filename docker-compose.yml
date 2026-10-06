@@ -1,0 +1,17 @@
+services:
+  db:
+    image: postgres:latest
+    container_name: parkpal-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: parkpal
+      POSTGRES_PASSWORD: pass
+      POSTGRES_DB: parkpal
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+      - ./backend/scripts/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+volumes:
+  pgdata:

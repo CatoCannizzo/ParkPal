@@ -1,62 +1,104 @@
-from flask import Flask
-from flask import request
-from flask import jsonify
-from flask_cors import CORS, cross_origin
-from configparser import ConfigParser
-from cryptography.hazmat.primitives import serialization
-from cryptography import x509
-from cryptography.hazmat.backends import default_backend
-import psycopg2 as psql
-import bcrypt
-import config
+import os
 import json
+import datetime
+from pathlib import Path
+from contextlib import contextmanager
+from configparser import ConfigParser
+
+from flask import Flask, request, jsonify
+from flask_cors import CORS, cross_origin
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives import serialization
+import psycopg2 as psql
+import psycopg2.errors
+import bcrypt
 import jwt
 
-private_key = open('.cert/privatekey.pem', 'r').read()
-public_key = open('.cert/publickey.cer', 'r').read()
+# Certificate setup
+CERT_DIR = Path(__file__).resolve().parent / '.cert'
+PRIVATE_KEY_PATH = CERT_DIR / 'privatekey.pem'
+PUBLIC_KEY_PATH = CERT_DIR / 'publickey.cer'
+
+def ensure_keys():
+    """Ensure RSA keypair exists for JWT signing and verification."""
+    if not PRIVATE_KEY_PATH.exists() or not PUBLIC_KEY_PATH.exists():
+        CERT_DIR.mkdir(parents=True, exist_ok=True)
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+        )
+        private_pem = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        public_pem = private_key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+        with open(PRIVATE_KEY_PATH, 'wb') as f:
+            f.write(private_pem)
+        with open(PUBLIC_KEY_PATH, 'wb') as f:
+            f.write(public_pem)
+        print("Generated new RSA key pair in .cert/")
+
+ensure_keys()
+private_key = open(PRIVATE_KEY_PATH, 'r').read()
+public_key = open(PUBLIC_KEY_PATH, 'r').read()
 
 app = Flask(__name__)
 cors = CORS(app)
 app.config['CORS_HEADERS'] = 'Content-Type'
 
-def config(filename='db.ini', section='parkpal'):
-    parser = ConfigParser()
-    parser.read(filename)
-
+def get_db_config(filename='db.ini', section='parkpal'):
+    possible_paths = [
+        Path(filename),
+        Path(__file__).resolve().parent / filename,
+    ]
     db = {}
-    if parser.has_section(section):
-        params = parser.items(section)
-        for param in params:
-            db[param[0]] = param[1]
-    else:
-        raise Exception('Section {0} not found in the {1} file'.format(section, filename))
-    
+    for p in possible_paths:
+        if p.exists():
+            parser = ConfigParser()
+            parser.read(p)
+            if parser.has_section(section):
+                for param in parser.items(section):
+                    db[param[0]] = param[1]
+                break
+
+    if os.environ.get('DB_HOST'):
+        db['host'] = os.environ.get('DB_HOST')
+    if os.environ.get('DB_PORT'):
+        db['port'] = os.environ.get('DB_PORT')
+    if os.environ.get('DB_NAME'):
+        db['database'] = os.environ.get('DB_NAME')
+    if os.environ.get('DB_USER'):
+        db['user'] = os.environ.get('DB_USER')
+    if os.environ.get('DB_PASSWORD'):
+        db['password'] = os.environ.get('DB_PASSWORD')
+
+    if not db:
+        db = {
+            'host': '127.0.0.1',
+            'port': '5433',
+            'database': 'parkpal',
+            'user': 'parkpal',
+            'password': 'pass'
+        }
     return db
 
-def connect():
-    """ Connect to the PostgreSQL database server """
-    conn = None
+@contextmanager
+def get_db_cursor():
+    """Context manager for acquiring a PostgreSQL connection and cursor safely."""
+    conn = psql.connect(**get_db_config())
     try:
-        params = config()
-
-        print('Connecting to the PostgreSQL database...')
-        conn = psql.connect(**params)
-		
-        cur = conn.cursor()
-        
-        print('PostgreSQL database version:')
-        cur.execute('SELECT version()')
-
-        db_version = cur.fetchone()
-        print(db_version)
-       
-        cur.close()
-    except (Exception, psql.DatabaseError) as error:
-        print(error)
+        with conn.cursor() as cur:
+            yield cur, conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        if conn is not None:
-            conn.close()
-            print('Database connection closed.')
+        conn.close()
 
 def parkOut(park):
     return {
@@ -84,35 +126,33 @@ def healthcheck():
 @app.route('/auth_login', methods=['POST'])
 @cross_origin()
 def login():
-    request.form = json.loads(request.data)
-    user = request.form['username']
-    passwd = bytes(request.form['password'], 'UTF-8')
-    salt = bcrypt.gensalt()
-    hashed_pass = bcrypt.hashpw(passwd, salt)
-    params = config()
-    conn = psql.connect(**params)
-    res = None
-    with conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT password, id FROM users WHERE username=%s", (user,))
-            res = cur.fetchone()
+    data = request.get_json(silent=True) or {}
+    user = data.get('username', '').strip()
+    passwd = data.get('password', '')
+
+    if not user or not passwd:
+        return jsonify({"status": "unauthorized", "msg": "Username and password required"}), 400
+
+    with get_db_cursor() as (cur, _):
+        cur.execute("SELECT password, id FROM users WHERE username=%s", (user,))
+        res = cur.fetchone()
+
     if res is not None:
-        if bcrypt.checkpw(passwd, bytes(res[0], 'UTF-8')):
-            print("{}'s HASHES match! Authorizing access...".format(user))
-            print("Creating JWT for {}".format(user))
+        db_hashed = res[0]
+        if bcrypt.checkpw(passwd.encode('utf-8'), db_hashed.encode('utf-8')):
             payload_data = {
-                "sub": res[1],
-                "nickname": user
+                "sub": str(res[1]),
+                "nickname": user,
+                "exp": datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=7),
+                "iat": datetime.datetime.now(datetime.timezone.utc)
             }
             new_token = jwt.encode(
                 payload=payload_data,
                 key=private_key,
                 algorithm='RS256'
             )
-            print("{} is {}'s JWT token".format(new_token, user))
-            return jsonify({"status": "success", "msg": "success", "token": str(new_token)}), 200
+            return jsonify({"status": "success", "msg": "success", "token": new_token}), 200
         else:
-            print("{}'s HASHES don't match :( The password provided was wrong...".format(user))
             return jsonify({"status": "unauthorized", "msg": "incorrect password"}), 401
     else:
         return jsonify({"status": "unauthorized", "msg": "incorrect username"}), 401
@@ -120,21 +160,17 @@ def login():
 @app.route('/auth_register', methods=['POST'])
 @cross_origin()
 def register():
-    request.form = json.loads(request.data)
-    user = request.form['username']
-    passwd = bytes(request.form['password'], 'UTF-8')
-    if len(user) > 0 and len(request.form['password']) > 0:
+    data = request.get_json(silent=True) or {}
+    user = data.get('username', '').strip()
+    passwd = data.get('password', '')
+
+    if len(user) > 0 and len(passwd) > 0:
         salt = bcrypt.gensalt()
-        hashed_pass = bcrypt.hashpw(passwd, salt)
-        print("{}'s Hashed Password: {}".format(user, hashed_pass))
+        hashed_pass = bcrypt.hashpw(passwd.encode('utf-8'), salt).decode('utf-8')
         try:
-            params = config()
-            conn = psql.connect(**params)
-            with conn:
-                with conn.cursor() as cur:
-                    cur.execute("INSERT INTO users (username, password) VALUES (%s, %s) RETURNING id", (user, hashed_pass.decode('utf8')))
-                    cur.fetchone()
-            conn.close()
+            with get_db_cursor() as (cur, _):
+                cur.execute("INSERT INTO users (username, password) VALUES (%s, %s) RETURNING id", (user, hashed_pass))
+                cur.fetchone()
             return jsonify({"status": "success", "msg": "success"}), 200
         except psql.errors.UniqueViolation:
             return jsonify({"status": "error", "msg": "Please choose a different username"}), 409
@@ -144,121 +180,97 @@ def register():
 @app.route('/auth_editnote', methods=['POST'])
 @cross_origin()
 def editNote():
-    request.form = json.loads(request.data)
-    note = request.form['note']
-    park = request.form['pid']
-    raw_jwt = request.headers.get('Authorization')
-    if raw_jwt[0:7] == "Bearer ":
-        raw_jwt = raw_jwt[7:]
-        print(raw_jwt)
-        jwt_options = {
-            'verify_signature': True,
-            'verify_exp': True,
-            'verify_nbf': False,
-            'verify_iat': True,
-            'verify_aud': False
-        }
-        jwt_data = jwt.decode(options=jwt_options, jwt=raw_jwt, key=public_key, algorithms=['RS256', ])
-        print("JWT: {}".format(jwt_data))
-        print("note: {}".format(note))
-        print("park: {}".format(park))
-        #try:
-        params = config()
-        conn = psql.connect(**params)
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT * FROM notes WHERE uid = %s AND pid = %s",
-                    (jwt_data["sub"], park))
-                existing = cur.fetchone()
-                if existing == None:
-                    cur.execute("INSERT INTO notes (uid, pid, note) VALUES (%s, %s, %s)",
-                        (jwt_data["sub"], park, note))
-                else:
-                    cur.execute("UPDATE notes SET note = %s WHERE uid = %s AND pid = %s",
-                        (note, jwt_data["sub"], park))
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith("Bearer "):
+        return jsonify({"status": "error", "msg": "Invalid token"}), 401
+
+    raw_jwt = auth_header[7:].strip()
+    try:
+        jwt_data = jwt.decode(raw_jwt, key=public_key, algorithms=['RS256'])
+    except jwt.PyJWTError as e:
+        return jsonify({"status": "error", "msg": f"Token error: {str(e)}"}), 401
+
+    data = request.get_json(silent=True) or {}
+    note = data.get('note', '')
+    park = data.get('pid')
+
+    if park is None:
+        return jsonify({"status": "error", "msg": "Park ID required"}), 400
+
+    try:
+        user_id = int(jwt_data["sub"])
+        with get_db_cursor() as (cur, _):
+            cur.execute("SELECT note FROM notes WHERE uid = %s AND pid = %s", (user_id, park))
+            existing = cur.fetchone()
+            if existing is None:
+                cur.execute("INSERT INTO notes (uid, pid, note) VALUES (%s, %s, %s)", (user_id, park, note))
+            else:
+                cur.execute("UPDATE notes SET note = %s WHERE uid = %s AND pid = %s", (note, user_id, park))
         return jsonify({"status": "success", "msg": "Note saved"}), 200
-        #except:
-        #    return jsonify({"status": "failure", "msg": "Error saving note"}), 500
-    else:
-        return jsonify({"status": "error", "msg": "Invalid token"}), 400
+    except Exception as e:
+        return jsonify({"status": "failure", "msg": f"Error saving note: {str(e)}"}), 500
 
 @app.route('/auth_getnote', methods=['POST'])
 @cross_origin()
 def getNote():
-    request.form = json.loads(request.data)
-    park = request.form['pid']
-    raw_jwt = request.headers.get('Authorization')
-    if raw_jwt[0:7] == "Bearer ":
-        raw_jwt = raw_jwt[7:]
-        print(raw_jwt)
-        jwt_options = {
-            'verify_signature': True,
-            'verify_exp': True,
-            'verify_nbf': False,
-            'verify_iat': True,
-            'verify_aud': False
-        }
-        jwt_data = jwt.decode(options=jwt_options, jwt=raw_jwt, key=public_key, algorithms=['RS256', ])
-        try:
-            params = config()
-            conn = psql.connect(**params)
-            note = None
-            with conn:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT * FROM notes WHERE uid = %s AND pid = %s",
-                        (jwt_data["sub"], park))
-                    note = cur.fetchone()
-            conn.close()
-            if note != None:
-                return jsonify({"status": "success", "msg": "Note retrieved", "note": note[2]}), 200
-            else:
-                return jsonify({"status": "success", "msg": "Note retrieved", "note": ""}), 200
-        except:
-            return jsonify({"status": "success", "msg": "Note not retrieved", "note": "Error retrieving note"}), 500
-    else:
-        return jsonify({"status": "error", "msg": "Invalid token"}), 400
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith("Bearer "):
+        return jsonify({"status": "error", "msg": "Invalid token"}), 401
+
+    raw_jwt = auth_header[7:].strip()
+    try:
+        jwt_data = jwt.decode(raw_jwt, key=public_key, algorithms=['RS256'])
+    except jwt.PyJWTError as e:
+        return jsonify({"status": "error", "msg": f"Token error: {str(e)}"}), 401
+
+    data = request.get_json(silent=True) or {}
+    park = data.get('pid')
+
+    if park is None:
+        return jsonify({"status": "error", "msg": "Park ID required"}), 400
+
+    try:
+        user_id = int(jwt_data["sub"])
+        with get_db_cursor() as (cur, _):
+            cur.execute("SELECT note FROM notes WHERE uid = %s AND pid = %s", (user_id, park))
+            row = cur.fetchone()
+            note_val = row[0] if row else ""
+        return jsonify({"status": "success", "msg": "Note retrieved", "note": note_val}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "msg": f"Error retrieving note: {str(e)}"}), 500
 
 @app.route('/parks')
 def getParks():
     try:
-        params = config()
-        conn = psql.connect(**params)
-        cur = conn.cursor()
-        cur.execute('SELECT * FROM park')
-        parks = cur.fetchall()
-        conn.close()
+        with get_db_cursor() as (cur, _):
+            cur.execute('SELECT pid, name, fid, lat, lon, hours, youth_only, lighting FROM park')
+            parks = cur.fetchall()
+
         ret = {}
         for park in parks:
-            if str(park[1]) in ret.keys():
-                ret[str(park[1])]["fids"].append(park[2])
+            key = str(park[1])
+            if key in ret:
+                ret[key]["fids"].append(park[2])
             else:
-                ret[str(park[1])] = parkOut(park)
-        retarr = []
-        for park in ret:
-            retarr.append(ret[str(park)])
-        return json.dumps(retarr)
-    except (Exception, psql.DatabaseError) as error:
-        print(error)
-        conn.close()
-        return 500
+                ret[key] = parkOut(park)
+
+        return jsonify(list(ret.values())), 200
+    except Exception as error:
+        print(f"Error fetching parks: {error}")
+        return jsonify({"error": str(error)}), 500
 
 @app.route('/features')
 def getFeatures():
     try:
-        params = config()
-        conn = psql.connect(**params)
-        cur = conn.cursor()
-        cur.execute('SELECT * FROM feature')
-        features = cur.fetchall()
-        conn.close()
-        ret = []
-        for feature in features:
-            ret.append(featureOut(feature))
-        return json.dumps(ret)
-    except (Exception, psql.DatabaseError) as error:
-        print(error)
-        conn.close()
-        return 500
+        with get_db_cursor() as (cur, _):
+            cur.execute('SELECT fid, name, image FROM feature')
+            features = cur.fetchall()
+
+        ret = [featureOut(f) for f in features]
+        return jsonify(ret), 200
+    except Exception as error:
+        print(f"Error fetching features: {error}")
+        return jsonify({"error": str(error)}), 500
 
 if __name__ == '__main__':
-    app.run()
+    app.run(host='0.0.0.0', port=5000, debug=True)

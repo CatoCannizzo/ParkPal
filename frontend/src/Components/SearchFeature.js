@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 import "../Styles/App.css";
 import "../Styles/BreakPoints.css";
@@ -8,12 +8,19 @@ export default function SearchFeature(props) {
 	// console.log(props);
 
 	//all the feature avaliable to search from
-	const featureList = props.allFeatures;
+	const featureList = props.allFeatures || [];
 
 	//the feature list the user picked
 	const [picked, setPicked] = useState([]);
 	//the list of all the features
 	const [pool, setPool] = useState(featureList);
+
+	useEffect(() => {
+		if (props.allFeatures && props.allFeatures.length > 0) {
+			const pickedNames = new Set(picked.map((p) => p.name));
+			setPool(props.allFeatures.filter((f) => !pickedNames.has(f.name)));
+		}
+	}, [props.allFeatures, picked]);
 
 	//handles the event when user clicks a item in pool
 	const handleRemovePool = (feature) => {
@@ -36,13 +43,10 @@ export default function SearchFeature(props) {
 		//if user picked features
 		if (picked.length) {
 			//make an array with every fid from picked
-			let wantedfids = [];
-			picked.map((feature) => {
-				wantedfids.push(feature.fid);
-			});
+			let wantedfids = picked.map((feature) => feature.fid);
 
 			//iterate through all parks
-			props.allParks.map((park) => {
+			(props.allParks || []).forEach((park) => {
 				//function to check if every element in wantedfid is in park features
 				const checker = wantedfids.every((fid) => {
 					return park.fids.includes(fid);

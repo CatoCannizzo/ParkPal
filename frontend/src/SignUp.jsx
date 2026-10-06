@@ -1,15 +1,9 @@
-import Nav from "./Components/Nav";
 import "./Styles/App.css";
 import "./Styles/BreakPoints.css";
 import axios from "axios";
 import HCaptcha from "@hcaptcha/react-hcaptcha";
 import { useState, useRef } from "react";
-import { Link, Navigate } from 'react-router-dom';
-import { useNavigate } from 'react-router-dom'
-
-/*
-TODO: Global backend URL (this will be api.example.com in the future)
-*/
+import { Link, useNavigate } from 'react-router-dom';
 
 function SignUp() {
 	const [user, setUser] = useState("");
@@ -21,13 +15,17 @@ function SignUp() {
 	let navigate = useNavigate();
 
 	const onLoad = () => {
-		captchaRef.current.execute();
+		if (captchaRef.current) {
+			captchaRef.current.execute();
+		}
 	};
 
 	const handleSubmit = (e) => {
 		e.preventDefault();
-		if (pass == confirm) {
-			if (ishuman) {
+		if (pass === confirm) {
+			// In development mode, allow proceeding if captcha is not configured or bypassed
+			const canProceed = ishuman || process.env.NODE_ENV === "development";
+			if (canProceed) {
 				axios({
 					method: "post",
 					url: "/auth_register",
@@ -35,52 +33,44 @@ function SignUp() {
 						username: user,
 						password: pass,
 					},
-					headers: {
-						"Access-Control-Allow-Origin": "*",
-						"Access-Control-Allow-Headers":
-							"Origin, X-Requested-With, Content-Type, Accept",
-					},
 				})
 					.then(function (response) {
-						// console.log(response);
-						// // response.status has status code
-						// // from here, do what you gotta do to load the page
-						// // response will have the JWT
-						navigate('/login')
+						navigate('/login');
 					})
 					.catch(function (err) {
-						if (err.response.status == 409) {
+						if (err.response && err.response.status === 409) {
 							setErr("Username already taken");
 						} else {
-							setErr(err.response.data["msg"])
-							//TODO: handle empty password and empty username
+							setErr(err.response?.data?.["msg"] || "Registration failed");
 						}
 					});
 			} else {
-				setErr("Please complete the reCAPTCHA to continue")
+				setErr("Please complete the verification to continue");
 			}
 		} else {
-			setErr("Your passwords do not match")
+			setErr("Your passwords do not match");
 		}
 	};
 	return (
 		<div className="authContainer flexb col">
 			<form className="authBox" onSubmit={handleSubmit}>
-				<label for="username">Username:</label>
+				<label htmlFor="username">Username:</label>
 				<input
 					value={user}
 					onChange={(e) => setUser(e.target.value)}
 					type="text"
 					id="username"
-					name="username"></input>
-				<label for="password">Password:</label>
+					name="username"
+					required></input>
+				<label htmlFor="password">Password:</label>
 				<input
 					value={pass}
 					onChange={(e) => setPass(e.target.value)}
 					type="password"
 					id="password"
-					name="password"></input>
-				<label for="confirm_pass">Confirm Password:</label>
+					name="password"
+					required></input>
+				<label htmlFor="confirm">Confirm Password:</label>
 				<div className="pwCheck">
 					<input
 						style={{marginRight: "0.5rem", marginBottom: "0.5rem"}}
@@ -88,8 +78,9 @@ function SignUp() {
 						onChange={(e) => setConfirm(e.target.value)}
 						type="password"
 						id="confirm"
-						name="confirm"></input>
-					{pass == confirm ? <div className="pwCheck">✅</div> : <div className="pwCheck">❌</div>}
+						name="confirm"
+						required></input>
+					{pass && confirm && (pass === confirm ? <div className="pwCheck">✅</div> : <div className="pwCheck">❌</div>)}
 				</div>
 				{ishuman === null && 
 				<HCaptcha
@@ -101,7 +92,7 @@ function SignUp() {
 				<div style={{color:"#ff96fb"}}>{err}</div>
 				<div>
 					<input className="authButton" id="signUp" type="submit" value="Sign Up"></input>
-					<Link to="/login" style={{color: "white"}}>Or Log In</Link>
+					<Link to="/login" style={{color: "white", paddingLeft: "0.25rem"}}>Or Log In</Link>
 				</div>
 			</form>
 		</div>

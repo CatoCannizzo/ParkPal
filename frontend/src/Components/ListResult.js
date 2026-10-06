@@ -11,9 +11,10 @@ export default function ListResult(props) {
 			{props.parks?.map((park, index) => {
 				return (
 					<ParkSlides
+						key={park.pid || index}
 						sortie={index}
 						{...park}
-						selected={index == props.selected}
+						selected={index === props.selected}
 						setSelected={props.setSelected}
 					/>
 				);

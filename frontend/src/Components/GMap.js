@@ -1,17 +1,22 @@
 import { useEffect, useRef, useMemo, useCallback } from "react";
-import { GoogleMap, Marker, MarkerClusterer } from "@react-google-maps/api";
+import { GoogleMap, Marker } from "@react-google-maps/api";
 import "../Styles/BreakPoints.css";
 import "../Styles/App.css";
 
 export default function ParkMap(props) {
 	const mapRef = useRef();
+
+	const selectedPark = props.parks && props.parks[props.selected] ? props.parks[props.selected] : props.parks?.[0];
+
 	const center = useMemo(
 		() => ({
-			lat: props.parks[props.selected].lon,
-			lng: props.parks[props.selected].lat,
+			lat: selectedPark?.lat || 47.6062,
+			lng: selectedPark?.lon || -122.3321,
 		}),
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 		[]
 	);
+
 	const options = useMemo(
 		() => ({
 			disableDefaultUI: true,
@@ -20,20 +25,15 @@ export default function ParkMap(props) {
 		}),
 		[]
 	);
-	//this is gonna be a problem on null
-	// console.log(props.parks);
-	// console.log(props.selected);
 
-	useEffect(
-		() =>
+	useEffect(() => {
+		if (selectedPark && selectedPark.lat && selectedPark.lon) {
 			mapRef.current?.panTo({
-				lat: props.parks[props.selected].lon,
-				lng: props.parks[props.selected].lat,
-			}),
-		[props.selected, props.parks]
-	);
-	// console.log("props");
-	// console.log(props);
+				lat: selectedPark.lat,
+				lng: selectedPark.lon,
+			});
+		}
+	}, [selectedPark]);
 
 	const onLoad = useCallback((map) => (mapRef.current = map), []);
 
@@ -46,24 +46,13 @@ export default function ParkMap(props) {
 			onLoad={onLoad}>
 			{props.parks?.map((park, i) => (
 				<Marker
-					key={i}
-					position={{ lng: park.lat, lat: park.lon }}
+					key={park.pid || i}
+					position={{ lat: park.lat, lng: park.lon }}
 					onClick={() => {
 						props.setSelected(i);
 					}}
 				/>
 			))}
-
-			{/* <MarkerClusterer>
-				{(clusterer) =>
-					GMprops.parks?.map((park) => (
-						<Marker
-							position={{ lng: park.lat, lat: park.lon }}
-							clusterer={clusterer}
-						/>
-					))
-				}
-			</MarkerClusterer> */}
 		</GoogleMap>
 	);
 }

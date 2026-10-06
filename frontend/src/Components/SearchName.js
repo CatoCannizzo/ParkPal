@@ -8,30 +8,31 @@ export default function SearchName(props) {
 	//text input of user
 	const [text, setText] = useState("");
 
-	function send(index) {
+	function send(index = 0) {
 		if (suggestions.length > 0) {
-			let matches = Renamer(suggestions, props.allFeatures);
+			let matches = Renamer([...suggestions], props.allFeatures);
 			props.setSearchResults({
-				selected: index,
+				selected: index || 0,
 				searchResults: matches,
 			});
-		} else
-			try {
-				props.allParks.map((park) => {
-					if (park.name == text) {
-						let matches = Renamer(park, props.allFeatures);
-						// console.log("foundmyself");
-						props.setSearchResults({
-							selected: 0,
-							searchResults: park,
-						});
-					}
+		} else if (text.trim().length > 0) {
+			const matched = props.allParks.filter((park) =>
+				park.name.toLowerCase().includes(text.trim().toLowerCase())
+			);
+			if (matched.length > 0) {
+				let matches = Renamer([...matched], props.allFeatures);
+				props.setSearchResults({
+					selected: 0,
+					searchResults: matches,
 				});
-			} catch {
+			} else {
 				props.setWarning(`Could not find park with name "${text}"`);
 			}
+		} else {
+			props.setWarning("Please enter a park name to search");
+		}
 	}
-	function onKeyPress(e) {
+	function onKeyDown(e) {
 		if (e.key === "Enter") {
 			send();
 		}
@@ -59,7 +60,7 @@ export default function SearchName(props) {
 				onChange={(e) => onChangeHandler(e.target.value)}
 				value={text}
 				placeholder="Ravenna Park"
-				onKeyPress={onKeyPress}
+				onKeyDown={onKeyDown}
 				onBlur={() => {
 					setTimeout(() => {
 						setSuggestions([]);

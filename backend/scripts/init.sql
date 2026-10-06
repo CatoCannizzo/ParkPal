@@ -1,22 +1,28 @@
-CREATE USER parkpal WITH PASSWORD 'securepass';
-CREATE DATABASE parkpal WITH OWNER = parkpal;
-CREATE TABLE parkpal.user (
-    id INTEGER PRIMARY KEY NOT NULL,
-    username VARCHAR (255) UNIQUE NOT NULL,
-    password CHAR (60) NOT NULL
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(255) UNIQUE NOT NULL,
+    password VARCHAR(255) NOT NULL
 );
-CREATE TABLE parkpal.feature (
+
+CREATE TABLE IF NOT EXISTS feature (
     fid INTEGER UNIQUE NOT NULL,
-    name VARCHAR (35) UNIQUE NOT NULL,
+    name VARCHAR(255) UNIQUE NOT NULL,
     image VARCHAR
 );
-CREATE TABLE parkpal.park (
+
+CREATE TABLE IF NOT EXISTS park (
     pid INTEGER NOT NULL,
-    name VARCHAR,
+    name VARCHAR(255),
     fid INTEGER NOT NULL,
     lat FLOAT,
     lon FLOAT,
-    hours VARCHAR (60),
+    hours VARCHAR(255),
     youth_only BOOLEAN,
     lighting BOOLEAN
+);
+
+CREATE TABLE IF NOT EXISTS notes (
+    pid INTEGER NOT NULL,
+    uid INTEGER NOT NULL,
+    note VARCHAR
 );
